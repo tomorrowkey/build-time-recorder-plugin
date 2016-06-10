@@ -1,0 +1,119 @@
+final REPOSITORY_URL = 'https://github.com/tomorrowkey/build-time-recorder'
+
+final GROUP_ID = 'jp.tomorrowkey.gradle.buildtimerecorder'
+final ARTIFACT_ID = 'build-time-recorder'
+final VERSION = '0.0.1'
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.gradle.api.plugins:gradle-nexus-plugin:0.3'
+    }
+}
+
+apply plugin: 'groovy'
+apply plugin: 'maven'
+apply plugin: 'nexus'
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    mavenDeployer
+    driver
+}
+
+dependencies {
+    compile localGroovy()
+    compile gradleApi()
+    compile 'com.android.tools.build:gradle:2.1.0'
+    compile 'com.gitblit.iciql:iciql:2.1.1'
+    compile 'org.xerial:sqlite-jdbc:3.8.11.2'
+    driver 'org.xerial:sqlite-jdbc:3.8.11.2'
+}
+
+// artifact settings
+String git(String command) {
+    println "git $command"
+    def process = ["sh", "-c", "cd ${project.rootDir} ; git $command"].execute()
+    if (process.waitFor() != 0) {
+        throw new GradleException(process.err.text)
+    }
+    return process.in.text
+
+}
+
+task('releng') {
+    doLast {
+        def gitStatus = git("status --porcelain")
+        if (gitStatus.trim()) {
+            throw new GradleException("Changes found:\n$gitStatus")
+        }
+
+        println git("tag v$VERSION")
+        println git("push origin v$VERSION")
+    }
+}
+
+artifacts {
+    archives jar
+    archives javadocJar
+    archives sourcesJar
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        pom.groupId = GROUP_ID
+        pom.artifactId = ARTIFACT_ID
+        pom.version = VERSION
+    }
+}
+
+modifyPom {
+    project {
+        name 'Build time recorder'
+        description 'Hello, world!'
+        url REPOSITORY_URL
+        inceptionYear '2016'
+
+        scm {
+            url REPOSITORY_URL
+        }
+
+        licenses {
+            license {
+                name 'The Apache Software License, Version 2.0'
+                url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                distribution 'repo'
+            }
+        }
+
+        developers {
+            developer {
+                id 'tomorrowkey'
+                name 'Tomoki Yamashita'
+                email 'tomorrowkey@gmail.com'
+            }
+        }
+    }
+}
+
+URLClassLoader loader = GroovyObject.class.classLoader
+configurations.driver.each{File file ->
+    loader.addURL(file.toURI().toURL())
+}
+
+task generateModel << {
+    def packageName = 'jp.tomorrowkey.gradle.buildtimerecorder.model'
+    def url = 'jdbc:sqlite://' + new File('build_time_recorder.sqlite').absolutePath
+    def folder = new File('generate').absolutePath
+
+    com.iciql.util.GenerateModels.main(
+        '-package', packageName,
+        '-url', url,
+        '-folder', folder,
+    )
+}
